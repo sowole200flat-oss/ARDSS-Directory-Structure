@@ -1,0 +1,26 @@
+ardss/
+├── data/
+│   ├── raw/              # synthetic retrospective entries (JSON)
+│   ├── processed/        # tokenised and lemmatised outputs
+│   └── ground_truth_labels.csv
+├── modules/
+│   ├── __init__.py
+│   ├── preprocessor.py   # text cleaning and normalisation
+│   ├── analytics_engine.py  # TF-IDF, clustering, keywords, sentiment
+│   ├── llm_layer.py      # OpenAI GPT-4o structured prompting
+│   └── risk_register.py  # assembles draft risk register
+├── dashboard/
+│   └── app.py            # Streamlit dashboard application
+├── evaluation/
+│   ├── evaluate_baseline.py
+│   ├── evaluate_ai_assisted.py
+│   └── metrics.py
+├── tests/
+│   ├── test_preprocessor.py
+│   ├── test_analytics_engine.py
+│   ├── test_llm_layer.py
+│   ├── test_risk_register.py
+│   └── test_integration.py
+├── logs/                 # LLM prompt and response logs
+├── requirements.txt
+└── config.py             # taxonomy, API settings, constants
