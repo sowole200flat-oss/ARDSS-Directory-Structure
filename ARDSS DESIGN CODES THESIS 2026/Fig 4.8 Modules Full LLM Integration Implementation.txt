@@ -1,0 +1,90 @@
+# modules/llm_layer.py
+import os, json, logging
+from datetime import datetime
+from openai import OpenAI
+from config import RISK_CATEGORIES, LLM_MODEL, LLM_MAX_TOKENS, LLM_TEMPERATURE, LOG_DIR
+
+logging.basicConfig(
+    filename=os.path.join(LOG_DIR, "llm_calls.log"),
+    level=logging.INFO,
+    format="%(asctime)s %(message)s"
+)
+
+SYSTEM_PROMPT = """You are an expert Agile project risk analyst.
+Your task is to analyse sprint retrospective entries and identify
+the risk signals they contain. You will classify each entry using
+the five-category taxonomy provided, extract supporting evidence,
+and assign a confidence level to your classification.
+
+Risk categories:
+  schedule    - timeline, velocity, deadline pressure
+  technical   - code quality, debt, architecture, test coverage
+  resource    - team capacity, skill gaps, availability
+  stakeholder - requirements clarity, alignment, communication
+  dependency  - blocked work, external services, inter-team waits
+
+You must respond ONLY with a valid JSON object --- no other text.
+The JSON must conform exactly to the schema shown in the user prompt."""
+
+USER_PROMPT_TEMPLATE = """Analyse the following retrospective entry.
+
+Entry ID: {entry_id}
+Entry text:
+"""{text}"""
+
+Step 1: Identify any risk signals present in the text.
+Step 2: Determine the primary risk category from: {categories}.
+Step 3: Determine a secondary category if applicable (or null).
+Step 4: Extract one to three short excerpts (direct quotes) from the
+        text that best support the primary classification.
+Step 5: Assign a confidence level: high (clear explicit signal),
+        medium (present but indirect), or low (ambiguous or suppressed).
+
+Respond with this exact JSON structure:
+{{
+  "entry_id": "{entry_id}",
+  "reasoning": "<your step-by-step reasoning>",
+  "primary_category": "<category>",
+  "secondary_category": "<category or null>",
+  "confidence": "<high|medium|low>",
+  "evidence": ["<excerpt 1>", "<excerpt 2>"]
+}}"""
+
+class LLMLayer:
+    """Handles structured risk classification via OpenAI GPT-4o."""
+
+    def __init__(self):
+        self.client = OpenAI()  # reads OPENAI_API_KEY from environment
+
+    def classify_entry(self, entry_id: str, text: str) -> dict:
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            entry_id=entry_id, text=text,
+            categories=", ".join(RISK_CATEGORIES)
+        )
+        logging.info("PROMPT | entry=%s", entry_id)
+        response = self.client.chat.completions.create(
+            model=LLM_MODEL,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=LLM_MAX_TOKENS,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": user_prompt}
+            ]
+        )
+        raw_response = response.choices[0].message.content.strip()
+        logging.info("RESPONSE | entry=%s | raw=%s", entry_id, raw_response)
+        try:
+            # Strip any accidental markdown code fences before parsing
+            clean = raw_response.replace("```json", "").replace("```", "").strip()
+            result = json.loads(clean)
+        except json.JSONDecodeError as exc:
+            logging.error("JSON parse error for entry %s: %s", entry_id, exc)
+            result = {"entry_id": entry_id, "reasoning": "parse_error",
+                      "primary_category": "unclassified",
+                      "secondary_category": None, "confidence": "low",
+                      "evidence": []}
+        return result
+
+    def classify_corpus(self, analytics_df) -> list:
+        return [self.classify_entry(row["entry_id"], row["text"])
+                for _, row in analytics_df.iterrows()]

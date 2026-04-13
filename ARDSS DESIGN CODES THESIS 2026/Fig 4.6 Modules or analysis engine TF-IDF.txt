@@ -1,0 +1,82 @@
+# modules/analytics_engine.py (Part 1: TF-IDF and Clustering)
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from config import (
+    N_CLUSTERS, TFIDF_MAX_FEATURES, TFIDF_NGRAM_RANGE, TFIDF_MIN_DF,
+    KMEANS_RANDOM_STATE, KMEANS_N_INIT, TOP_KEYWORDS_PER_CLUSTER,
+    SENTIMENT_COMPOUND_THRESHOLD_POS, SENTIMENT_COMPOUND_THRESHOLD_NEG
+)
+
+class AnalyticsEngine:
+    """Performs TF-IDF vectorisation, K-means clustering,
+    keyword extraction, and VADER sentiment analysis.
+    """
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer(
+            max_features=TFIDF_MAX_FEATURES,
+            ngram_range=TFIDF_NGRAM_RANGE,
+            min_df=TFIDF_MIN_DF,
+            sublinear_tf=True
+        )
+        self.kmeans = KMeans(
+            n_clusters=N_CLUSTERS,
+            n_init=KMEANS_N_INIT,
+            random_state=KMEANS_RANDOM_STATE
+        )
+        self.sia = SentimentIntensityAnalyzer()
+        self.tfidf_matrix = None
+        self.cluster_labels = None
+        self.cluster_to_category = {}
+
+    def fit_transform(self, corpus_token_strings: list) -> np.ndarray:
+        self.tfidf_matrix = self.vectorizer.fit_transform(corpus_token_strings)
+        self.cluster_labels = self.kmeans.fit_predict(self.tfidf_matrix)
+        return self.tfidf_matrix
+
+    def get_top_keywords_per_cluster(self) -> dict:
+        terms = self.vectorizer.get_feature_names_out()
+        centroids = self.kmeans.cluster_centers_
+        keywords = {}
+        for cluster_idx in range(N_CLUSTERS):
+            top_indices = centroids[cluster_idx].argsort()[::-1][:TOP_KEYWORDS_PER_CLUSTER]
+            keywords[cluster_idx] = [terms[i] for i in top_indices]
+        return keywords
+
+    def map_clusters_to_taxonomy(self, keywords: dict,
+                                  manual_mapping: dict = None) -> dict:
+        if manual_mapping:
+            self.cluster_to_category = manual_mapping
+            return manual_mapping
+        seed_terms = {
+            "schedule":    {"delay", "sprint", "deadline", "late",
+                            "behind", "velocity", "slip", "time"},
+            "technical":   {"bug", "debt", "refactor", "test", "coverage",
+                            "fragile", "code", "architecture", "module"},
+            "resource":    {"capacity", "bandwidth", "person", "team",
+                            "burnout", "availability", "skill", "knowledge"},
+            "stakeholder": {"requirement", "feedback", "owner", "priority",
+                            "unclear", "change", "communicate", "align"},
+            "dependency":  {"block", "wait", "external", "service",
+                            "integration", "depend", "third", "deliver"}
+        }
+        mapping = {}
+        used_categories = set()
+        for cluster_idx, kws in keywords.items():
+            # Match against individual tokens within each keyword phrase
+            kw_tokens = set()
+            for kw in kws:
+                kw_tokens.update(kw.split())
+            scores = {cat: len(kw_tokens & seeds)
+                      for cat, seeds in seed_terms.items()
+                      if cat not in used_categories}
+            if scores:
+                best = max(scores, key=scores.get)
+                mapping[cluster_idx] = best
+                used_categories.add(best)
+            else:
+                mapping[cluster_idx] = f"cluster_{cluster_idx}"
+        self.cluster_to_category = mapping
+        return mapping

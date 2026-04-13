@@ -1,0 +1,41 @@
+# modules/analytics_engine.py (Part 2: Sentiment and Full Pipeline)
+    def analyse_sentiment(self, original_text: str) -> dict:
+        """Returns VADER sentiment scores for the original (uncleaned) text.
+        Compound score: +1.0 = maximally positive, -1.0 = maximally negative.
+        """
+        scores = self.sia.polarity_scores(original_text)
+        compound = scores["compound"]
+        if compound >= SENTIMENT_COMPOUND_THRESHOLD_POS:
+            label = "positive"
+        elif compound <= SENTIMENT_COMPOUND_THRESHOLD_NEG:
+            label = "negative"
+        else:
+            label = "neutral"
+        return {"sentiment_label": label,
+                "sentiment_compound": round(compound, 4),
+                "sentiment_scores": scores}
+
+    def run_full_pipeline(self, processed_entries: list) -> pd.DataFrame:
+        """Orchestrates the full analytics pipeline."""
+        token_strings = [e["token_str"] for e in processed_entries]
+        self.fit_transform(token_strings)
+        keywords_by_cluster = self.get_top_keywords_per_cluster()
+        cluster_to_category = self.map_clusters_to_taxonomy(keywords_by_cluster)
+        rows = []
+        for i, entry in enumerate(processed_entries):
+            cluster_idx = int(self.cluster_labels[i])
+            risk_category = cluster_to_category.get(cluster_idx, "unassigned")
+            entry_keywords = keywords_by_cluster.get(cluster_idx, [])
+            sentiment_data = self.analyse_sentiment(entry["original"])
+            rows.append({
+                "entry_id":          entry["entry_id"],
+                "sprint":            entry["sprint"],
+                "text":              entry["original"],
+                "token_str":         entry["token_str"],
+                "cluster_index":     cluster_idx,
+                "risk_category":     risk_category,
+                "cluster_keywords":  entry_keywords,
+                "sentiment_label":   sentiment_data["sentiment_label"],
+                "sentiment_compound":sentiment_data["sentiment_compound"],
+            })
+        return pd.DataFrame(rows)

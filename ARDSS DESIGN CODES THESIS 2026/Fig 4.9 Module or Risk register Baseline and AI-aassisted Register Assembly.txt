@@ -1,0 +1,32 @@
+# modules/risk_register.py
+import pandas as pd
+from config import RISK_CATEGORIES
+
+def build_baseline_register(analytics_df: pd.DataFrame) -> pd.DataFrame:
+    """Constructs the baseline risk register from analytics engine outputs only."""
+    cols = ["entry_id", "sprint", "text", "risk_category",
+            "cluster_keywords", "sentiment_label", "sentiment_compound"]
+    register = analytics_df[cols].copy()
+    register["condition"] = "baseline"
+    register["confidence"] = "N/A"
+    register["evidence"] = [[] for _ in range(len(register))]
+    return register
+
+def build_ai_assisted_register(analytics_df: pd.DataFrame,
+                               llm_results: list) -> pd.DataFrame:
+    """Merges analytics engine outputs with LLM layer classifications."""
+    llm_df = pd.DataFrame(llm_results)[
+        ["entry_id", "primary_category", "secondary_category",
+         "confidence", "evidence", "reasoning"]
+    ].rename(columns={"primary_category": "llm_category",
+                      "secondary_category": "llm_secondary"})
+    merged = analytics_df.merge(llm_df, on="entry_id", how="left")
+    merged["category_agreement"] = (
+        merged["risk_category"] == merged["llm_category"]
+    )
+    # Final displayed category: prefer LLM classification
+    merged["final_category"] = merged["llm_category"].fillna(
+        merged["risk_category"]
+    )
+    merged["condition"] = "ai_assisted"
+    return merged

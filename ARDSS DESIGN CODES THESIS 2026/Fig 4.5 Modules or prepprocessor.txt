@@ -1,0 +1,53 @@
+# modules/preprocessor.py
+import re
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+
+nltk.download("punkt_tab", quiet=True)
+nltk.download("stopwords", quiet=True)
+nltk.download("wordnet", quiet=True)
+nltk.download("vader_lexicon", quiet=True)
+
+class PreprocessingPipeline:
+    """Cleans and normalises retrospective text entries for downstream NLP.
+    Preserves original text for sentiment analysis before cleaning.
+    """
+    def __init__(self):
+        self.stop_words = set(stopwords.words("english"))
+        # Retain negation words: they carry sentiment signal
+        negations = {"no", "not", "nor", "never", "neither",
+                     "cannot", "won't", "don't", "didn't",
+                     "couldn't", "shouldn't", "wouldn't"}
+        self.stop_words -= negations
+        self.lemmatizer = WordNetLemmatizer()
+
+    def _clean_text(self, text: str) -> str:
+        """Lowercase and remove non-alphabetic characters."""
+        text = text.lower()
+        text = re.sub(r"[^a-z\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _tokenise(self, text: str) -> list:
+        return word_tokenize(text)
+
+    def _remove_stopwords(self, tokens: list) -> list:
+        return [t for t in tokens if t not in self.stop_words and len(t) > 2]
+
+    def _lemmatise(self, tokens: list) -> list:
+        return [self.lemmatizer.lemmatize(t) for t in tokens]
+
+    def process_entry(self, raw_text: str) -> dict:
+        """Returns dict with keys: original, cleaned, tokens, token_str."""
+        cleaned = self._clean_text(raw_text)
+        tokens = self._tokenise(cleaned)
+        tokens = self._remove_stopwords(tokens)
+        tokens = self._lemmatise(tokens)
+        return {"original": raw_text, "cleaned": cleaned,
+                "tokens": tokens, "token_str": " ".join(tokens)}
+
+    def process_corpus(self, entries: list) -> list:
+        """Process a list of entry dicts and attach preprocessed fields."""
+        return [{**entry, **self.process_entry(entry["text"])} for entry in entries]
